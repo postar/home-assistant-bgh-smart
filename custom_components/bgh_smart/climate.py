@@ -6,27 +6,70 @@ import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
 
+# Manejo de compatibilidad para UnitOfTemperature (Home Assistant 2022.10+)
 try:
-    from homeassistant.components.climate import ClimateEntity, PLATFORM_SCHEMA
+    from homeassistant.components.sensor import UnitOfTemperature
 except ImportError:
-    from homeassistant.components.climate import ClimateDevice as ClimateEntity, PLATFORM_SCHEMA
+    from homeassistant.const import TEMP_CELSIUS, TEMP_FAHRENHEIT
+    UnitOfTemperature = type(
+        'UnitOfTemperature',
+        (),
+        {
+            'CELSIUS': TEMP_CELSIUS,
+            'FAHRENHEIT': TEMP_FAHRENHEIT,
+        },
+    )
 
-from homeassistant.components.climate.const import (
-    SUPPORT_TARGET_TEMPERATURE,
-    SUPPORT_FAN_MODE,
-    ATTR_HVAC_MODE,
-    HVAC_MODE_HEAT, HVAC_MODE_COOL, HVAC_MODE_FAN_ONLY, HVAC_MODE_DRY,
-    HVAC_MODE_AUTO, HVAC_MODE_OFF)
+try:
+    from homeassistant.components.climate import (
+        ClimateEntity,
+        PLATFORM_SCHEMA,
+        ClimateEntityFeature,
+        HVACMode,
+    )
+except ImportError:
+    from homeassistant.components.climate import (
+        ClimateDevice as ClimateEntity,
+        PLATFORM_SCHEMA,
+        ClimateEntityFeature,
+    )
+    from homeassistant.components.climate.const import (
+        HVAC_MODE_HEAT,
+        HVAC_MODE_COOL,
+        HVAC_MODE_FAN_ONLY,
+        HVAC_MODE_DRY,
+        HVAC_MODE_AUTO,
+        HVAC_MODE_OFF,
+    )
+    HVACMode = type(
+        'HVACMode',
+        (),
+        {
+            'HEAT': HVAC_MODE_HEAT,
+            'COOL': HVAC_MODE_COOL,
+            'FAN_ONLY': HVAC_MODE_FAN_ONLY,
+            'DRY': HVAC_MODE_DRY,
+            'AUTO': HVAC_MODE_AUTO,
+            'OFF': HVAC_MODE_OFF,
+        },
+    )
+
 from homeassistant.const import (
-    ATTR_ENTITY_ID, ATTR_STATE, ATTR_TEMPERATURE,
-    CONF_USERNAME, CONF_PASSWORD,
-    STATE_ON, STATE_OFF, STATE_UNKNOWN, TEMP_CELSIUS, TEMP_FAHRENHEIT)
+    ATTR_ENTITY_ID,
+    ATTR_STATE,
+    ATTR_TEMPERATURE,
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    STATE_ON,
+    STATE_OFF,
+    STATE_UNKNOWN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_USERNAME): cv.string,
-    vol.Required(CONF_PASSWORD): cv.string
+    vol.Required(CONF_PASSWORD): cv.string,
 })
 
 FAN_AUTO = 'auto'
@@ -35,39 +78,34 @@ FAN_MEDIUM = 'mid'
 FAN_HIGH = 'high'
 
 MAP_MODE_ID = {
-    0: HVAC_MODE_OFF,
-    1: HVAC_MODE_COOL,
-    2: HVAC_MODE_HEAT,
-    3: HVAC_MODE_DRY,
-    4: HVAC_MODE_FAN_ONLY,
-    254: HVAC_MODE_AUTO
+    0: HVACMode.OFF,
+    1: HVACMode.COOL,
+    2: HVACMode.HEAT,
+    3: HVACMode.DRY,
+    4: HVACMode.FAN_ONLY,
+    254: HVACMode.AUTO,
 }
 
 MAP_FAN_MODE_ID = {
     1: FAN_LOW,
     2: FAN_MEDIUM,
     3: FAN_HIGH,
-    254: FAN_AUTO
+    254: FAN_AUTO,
 }
 
 def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up the BGH Smart platform."""
     import pybgh
 
-    # Assign configuration variables.
-    # The configuration check takes care they are present.
     username = config[CONF_USERNAME]
     password = config[CONF_PASSWORD]
 
-    # Setup connection with devices/cloud
     client = pybgh.BghClient(username, password)
 
-    # Verify that passed in configuration works
     if not client.token:
         _LOGGER.error("Could not connect to BGH Smart cloud")
         return
 
-    # Add devices
     devices = []
     for home in client.get_homes():
         home_devices = client.get_devices(home['HomeID'])
@@ -96,17 +134,25 @@ class BghHVAC(ClimateEntity):
 
         self._parse_data()
 
-        self._hvac_modes = [HVAC_MODE_AUTO, HVAC_MODE_COOL, HVAC_MODE_HEAT,
-                            HVAC_MODE_DRY, HVAC_MODE_FAN_ONLY, HVAC_MODE_OFF]
+        self._hvac_modes = [
+            HVACMode.AUTO,
+            HVACMode.COOL,
+            HVACMode.HEAT,
+            HVACMode.DRY,
+            HVACMode.FAN_ONLY,
+            HVACMode.OFF,
+        ]
         self._fan_modes = [FAN_AUTO, FAN_LOW, FAN_MEDIUM, FAN_HIGH]
-        self._support = (SUPPORT_TARGET_TEMPERATURE | SUPPORT_FAN_MODE)
+        self._support = (
+            ClimateEntityFeature.TARGET_TEMPERATURE
+            | ClimateEntityFeature.FAN_MODE
+        )
 
     def _parse_data(self):
         """Parse the data in self._device"""
         self._min_temp = 17
         self._max_temp = 30
 
-        # Sometimes the API doesn't answer with the raw_data
         if self._device['raw_data']:
             self._current_temperature = self._device['data']['temperature']
             self._target_temperature = self._device['data']['target_temperature']
@@ -114,9 +160,7 @@ class BghHVAC(ClimateEntity):
             self._fan_speed = MAP_FAN_MODE_ID[self._device['data']['fan_speed']]
 
     def update(self):
-        """Fetch new state data for this HVAC.
-        This is the only method that should fetch new data for Home Assistant.
-        """
+        """Fetch new state data for this HVAC."""
         self._device = self._client.get_status(self._home_id, self._device_id)
         self._parse_data()
 
@@ -127,8 +171,8 @@ class BghHVAC(ClimateEntity):
 
     @property
     def temperature_unit(self):
-        """BGH Smart API uses celsius on the backend."""
-        return TEMP_CELSIUS
+        """Return the unit of measurement."""
+        return UnitOfTemperature.CELSIUS  # Usa el nuevo enum
 
     @property
     def current_temperature(self):
@@ -142,12 +186,12 @@ class BghHVAC(ClimateEntity):
 
     @property
     def min_temp(self):
-        """Return the minimum temperature for the current mode of operation."""
+        """Return the minimum temperature."""
         return self._min_temp
 
     @property
     def max_temp(self):
-        """Return the maximum temperature for the current mode of operation."""
+        """Return the maximum temperature."""
         return self._max_temp
 
     @property
@@ -157,7 +201,7 @@ class BghHVAC(ClimateEntity):
 
     @property
     def hvac_mode(self):
-        """Return the current mode of operation if unit is on."""
+        """Return the current operation mode."""
         return self._mode
 
     @property
@@ -181,12 +225,13 @@ class BghHVAC(ClimateEntity):
             self._device_id,
             self._mode,
             self._target_temperature,
-            self._fan_speed)
+            self._fan_speed,
+        )
 
     def set_temperature(self, **kwargs):
         """Set new target temperature."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
-        operation_mode = kwargs.get(ATTR_HVAC_MODE)
+        operation_mode = kwargs.get("hvac_mode")
 
         if temperature:
             self._target_temperature = temperature
